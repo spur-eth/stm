@@ -3,10 +3,10 @@
 ## Setup for STM (R)
 The code for computing STM (Structural Topic Modelling) is in R. Install R if you have not already installed it, and download the required packages for workflow.
 
-    > The main packages you might require are [stm](https://cran.r-project.org/web/packages/stm/stm.pdf) and [stminsights](https://cran.r-project.org/web/packages/stminsights/vignettes/intro.html) and any dependencies.
-    > The version of R and R packages used for the analysis of this survey data can be found in the `R_session_info_STM.pdf` file in the `resources` folder, in case there are any issues with replicating the analysis. 
-    > For convenience the data from the survey responses (spur_survey_response_filtered_df1_for_stm_corrected_imces_v2.csv) is provided in the `data` folder, and the .RData image of the STM models generated from this data for the paper (stm_models_dens_survey_paper_final_2022.RData) are in the `stm_models` folder in the `outputs` folder. 
-    > A file with information about each of the topics (`stm_topic_interpretations.xlsx`) is included in the `metadata` folder.
+- The main packages you might require are [stm](https://cran.r-project.org/web/packages/stm/stm.pdf) and [stminsights](https://cran.r-project.org/web/packages/stminsights/vignettes/intro.html) and any dependencies.
+- The version of R and R packages used for the analysis of this survey data can be found in the `R_session_info_STM.pdf` file in the `resources` folder, in case there are any issues with replicating the analysis. 
+- For convenience the data from the survey responses (spur_survey_response_filtered_df1_for_stm_corrected_imces_v2.csv) is provided in the `data` folder, and the .RData image of the STM models generated from this data for the paper (stm_models_dens_survey_paper_final_2022.RData) are in the `stm_models` folder in the `outputs` folder. 
+- A file with information about each of the topics (`stm_topic_interpretations.xlsx`) is included in the `metadata` folder.
 
 ## Generating the STM models and visualizing the topics
 Can rerun the `01_generate_stm.Rmd` script to regenerate the results from the paper, or just visualize them by loading the .RData file and running stminsights to visualize the models. A .html version of the `01_generate_stm.Rmd` file is included in the `resources` folder for easy visualization of the code and some of its outputs.
