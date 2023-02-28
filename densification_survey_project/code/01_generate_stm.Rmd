@@ -1,0 +1,501 @@
+---
+title: "Structural Topic Model (STM) for Open Text Analysis"
+output:
+  html_notebook:
+    code_folding: show
+    highlight: tango
+    theme: united
+    toc: yes
+  html_document:
+    df_print: paged
+    toc: yes
+---
+
+Note: This code uses the example from the **stm** vignette as a starting point. Some cells may take a while to run.
+
+```{r package_import}
+# r setwd - set the working directory
+# load required packages
+library(lda)
+library(slam)
+library(stm)
+library(knitr)
+```
+
+## Reading and preparing data in **stm**
+
+Read in the data prepared with the python script pre-processing.
+Note: the columns and metadata columns (columns_meta) correspond to the spur_survey_response_filtered_df1_for_stm_corrected_imces_v2.csv because of recoded variables, including gender.
+
+```{r import_data, results="hide"}
+columns <- c('id', 'doc', 'frame', 'minority', 'linguistic_minority', 'religious_minority', 'social_class_minority', 'sexual_orientation_minority', 'ethnic_minority', 'national_minority', 'other_minority', 'disabled_minority', 'gender', 'age_numerical', 'income', 'citizenship', 'education', 'political_left_right', 'exp_housing_discrim', 'city_district', 'city_neighborhood', 'prof_situation', 'fear_forced_out', 'seen_landlord_pressure', 'changes_in_community', 'seen_renovations', 'neighborhood_connection', 'respect_rules', 'neighbhorhood_crime', 'env_pollution_impact', 'climate_concern', 'age', 'city', 'country', 'preframe_densifproj_acceptance', 'postframe_densifproj_acceptance', 'densifproj_on_rent', 'densifproj_on_social', 'imce_RentContr', 'imce_InclZon', 'imce_Partic', 'imce_nonProf', 'imce_dens', 'imce_mixUse', 'imce_ClimNeutr')
+
+columns_meta <- c('id', 'frame', 'minority', 'gender', 'age_numerical', 'income', 'citizenship', 'education', 'political_left_right', 'exp_housing_discrim', 'city_district', 'city_neighborhood', 'prof_situation', 'fear_forced_out', 'seen_landlord_pressure', 'changes_in_community', 'seen_renovations', 'neighborhood_connection', 'respect_rules', 'neighbhorhood_crime', 'env_pollution_impact', 'climate_concern', 'age', 'city', 'country', 'preframe_densifproj_acceptance', 'postframe_densifproj_acceptance', 'densifproj_on_rent', 'densifproj_on_social', 'imce_RentContr', 'imce_InclZon', 'imce_Partic', 'imce_nonProf', 'imce_dens', 'imce_mixUse', 'imce_ClimNeutr')
+
+#meta columns to use with spur_survey_response_filtered_df1_for_stm_corrected_imces_v2.csv because of recoded gender variable
+columns_meta <- c('id', 'frame', 'minority', 'gender_Female', 'gender_Male', 'gender_Non.binary', 'gender_Prefer.not.to.say','age_numerical', 'income', 'citizenship', 'education', 'political_left_right', 'politics', 'politics_w_extremes', 'exp_housing_discrim', 'city_district', 'city_neighborhood', 'prof_situation', 'fear_forced_out', 'seen_landlord_pressure', 'changes_in_community', 'seen_renovations', 'neighborhood_connection', 'respect_rules', 'neighbhorhood_crime', 'env_pollution_impact', 'climate_concern', 'age', 'city', 'country', 'preframe_densifproj_acceptance', 'postframe_densifproj_acceptance', 'densifproj_on_rent', 'densifproj_on_social', 'imce_RentContr', 'imce_InclZon', 'imce_Partic', 'imce_nonProf', 'imce_dens', 'imce_mixUse', 'imce_ClimNeutr')
+
+survey_data_file <- "data/spur_survey_response_filtered_df1_for_stm_corrected_imces_v2.csv"
+surveyFull <- read.csv(survey_data_file)
+#summary(surveyFull)
+
+```
+
+
+Create some of the objects/files for running stm. 
+
+We can convert the data to a dataframe format, take a look at the first five documents in long and short format, and save the metadata columns for later filtering if needed.
+
+```{r extract_meta, results="hide"}
+survey <- data.frame()
+survey.fulltext <- surveyFull$doc
+survey.shorttext <- substr(survey.fulltext,1,200)
+survey.fulltext[1:5]
+survey.shorttext[1:5]
+
+survey.meta <- surveyFull[,columns_meta]
+survey.meta
+```
+
+### Preprocessing option 1: within the **stm** package
+
+The *stm* package converts a vector of text and a dataframe of metadata into **stm** formatted objects using the command `textProcessor` which calls the package **tm** for its preprocessing routines. The pre-processing settings and considerations will vary based on the dataset. 
+
+```{r, preprocess, results="hide"}
+# * default parameters
+survey.proc <- textProcessor(documents=survey.fulltext,
+                                 metadata = survey.meta,
+                                 lowercase = TRUE, #*
+                                 removestopwords = TRUE, #*
+                                 removenumbers = TRUE, #*
+                                 removepunctuation = TRUE, #*
+                                 stem = TRUE, #*
+                                 wordLengths = c(2,Inf), #*
+                                 sparselevel = 1, #*
+                                 language = "en", #*
+                                 verbose = TRUE, #*
+                                 onlycharacter = TRUE, # not def
+                                 striphtml = FALSE, #*
+                                 customstopwords = NULL, #*
+                                 v1 = FALSE) #*
+```
+
+The processed object is a list of four objects: `documents`, `vocab`, `meta`, and `docs.removed`. The `documents` object is a list, one per document, of 2 row matrices; the first row indicates the index of a word found in the document, and the second row indicates the (nonzero) counts. If preprocessing causes any documents to be empty, they are removed, as are the corresponding rows of the `meta` object.
+
+These objects are in turn passed to the `prepDocuments` function, which filters vocabulary, and again removes empty documents and corresponding rows in the metadata. Will only remove words that only appear in one response for now. 
+
+
+```{r filter, results="hide"}
+survey.out <- prepDocuments(survey.proc$documents, survey.proc$vocab, survey.proc$meta, lower.thresh=1)
+plotRemoved(survey.proc$documents, lower.thresh = seq(1, 200, by = 100))
+
+#make a filtered version of the documents based on the ones excluded here: 
+survey.fulltext.filtered <- surveyFull[c(match(survey.out$meta$id, surveyFull$id)),]$doc 
+
+```
+
+### Preprocessing option 2: within **quanteda**
+
+**quanteda** is a commonly used package for reading in and pre-processing data that can be used instead of the **stm** `textProcessor` and `prepDocuments`. Just run quanteda and use the `convert` function to convert to **stm** and a variety of other formats.
+
+```{r, quanteda}
+library(quanteda)
+survey.fullmeta <- data.frame(doc_id=survey.meta$id, survey.meta, shorttext=survey.shorttext, fulltext=survey.fulltext, stringsAsFactors=FALSE)
+
+
+## create corpus
+survey.corpus <- quanteda::corpus(survey.fullmeta, docid_field="doc_id", text_field="fulltext")
+
+##tokenize 
+toks <- quanteda::tokens(survey.corpus, 
+                         remove_numbers = TRUE, 
+                         remove_punct = TRUE, 
+                         remove_symbols=TRUE) %>% 
+  quanteda::tokens_remove(stopwords("en")) %>% 
+  quanteda::tokens_wordstem(language = "en")
+
+toks_ngram <- tokens_ngrams(toks, n = 1)
+head(toks_ngram[[6]], 30)
+
+survey.dfm <- dfm(toks_ngram, tolower=TRUE) #%>%
+topfeatures(survey.dfm, 20)
+```
+
+Again, let's trim that to words appearing in more than 1 documents (This is a highly permissive threshold. Others can choose however many documents seem reasonable to their data and research question). We convert to **stm** format using `quanteda::convert(survey.dfm, to = "stm")`
+
+```{r, quanteda_to_stm}
+survey.dfm <- dfm_trim(survey.dfm, min_docfreq=1, docfreq_type="count")
+dim(survey.dfm)
+
+survey.dfm2stm <- quanteda::convert(survey.dfm, to = "stm")
+names(survey.dfm2stm)
+
+#make a filtered version of the documents based on the ones excluded here: 
+survey.fulltext.filtered <- surveyFull[c(match(survey.dfm2stm$meta$id, surveyFull$id)),]$do
+```
+
+## Modeling without metadata structure
+
+The most basic model that can be generated, is like a topic model without structure. It's very similar to the SAGE (Eisenstein, et al.) sparse estimation of a model with a correlated topic model (CTM) generative process (Blei, et al.).
+
+In this case we will use our `survey.dfm2stm$documents` `survey.dfm2stm$vocab`, `survey.dfm2stm$meta` outputs from quanteda preprocessing for the `documents`, `vocab` (and eventually `meta`) respectively for the stm inputs. Can also use the inputs from the other preprocessing option. 
+
+Other notes: Spectral initialization is advised by the authors, and the model should replicate exactly under spectral initialization. One can suppress printed output with `verbose=FALSE`
+
+```{r, choose_input}
+#preprocessing option 1: stm native option
+#documents <- survey.out$documents
+#vocab <- survey.out$voc
+#meta <- survey.out$meta
+
+#preprocessing option 2: quanteda 
+documents <- survey.dfm2stm$documents
+vocab <- survey.dfm2stm$vocab
+meta <- survey.dfm2stm$meta
+```
+
+### Estimating K automatically: Exclusivity, Semantic Coherence, Heldout Likelihood, and Residual Dispersion
+
+NOTE: Running for a range of values of K, one can visualize some parameters to see if an obvious choice of K/ range of choices emerges from the computed metrics. (Commented out for now post run: takes about 5 minutes to run depending on the number of K and cores)
+
+More on the computed metrics here: https://search.r-project.org/CRAN/refmans/stm/html/searchK.html  
+```{r choose_K, eval=FALSE, include=FALSE}
+K<-c(5,7,9,10,11,12,13,14,15,16,17,19) #specify K to try
+
+#(intially run with pre-processing option 1 outputs)
+system.time(
+  survey.searchK <- searchK(documents = documents, 
+                     vocab = vocab,
+                     K = K,
+                     #N = 500, # matches 10% default
+                     proportion = 0.5, # default
+                     heldout.seed = 1234, # optional
+                     M = 10, # default
+                     cores = 2, # default
+                     #prevalence =~ frame,
+                     max.em.its = 75,
+                     data = meta,
+                     init.type = "Spectral",
+                     verbose=TRUE)
+)
+plot(survey.searchK)
+pdf("plots/model_choice/stm_nometa_plot-searchK.pdf", width=10, height=10)
+plot(survey.searchK)
+dev.off()
+```
+
+## Use the model without metadata to examine the model topics (e.g. with wordclouds and findThoughts()) and help choose a reasonable K for using for the STM models with the various metadata covariates.
+
+```{r stm_no_meta, message=FALSE, warning=FALSE}
+
+survey.fit.nometa <- stm(documents = documents, 
+                     vocab = vocab, 
+                     K = 15,
+                     max.em.its = 100,
+                     init.type = "Spectral", 
+                     verbose = FALSE)
+
+stm_for_graph <- survey.fit.nometa
+labelTopics(stm_for_graph)
+
+# Plot the STM using different types. See the proportion of each topic in the entire corpus. Save as pdf files.
+pdf("plots/model_choice/stm_nometa_K15_plot-summary.pdf", width=10, height=8.5)
+plot(stm_for_graph, type="summary", xlim=c(0,.4))
+dev.off()
+pdf("plots/model_choice/stm_nometa_K15_plot-labels.pdf", width=10, height=20)
+plot(stm_for_graph, type="labels", topics=c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15))
+dev.off()
+pdf("plots/model_choice/stm_nometa_K15_plot-histogram.pdf", width=14, height=12.5)
+plot(stm_for_graph, type="hist")
+dev.off()
+pdf("plots/model_choice/stm_nometa_K15_plot-perspectives-two-topic.pdf", width=14, height=12.5)
+plot(stm_for_graph, type="perspectives", topics=c(3,8))
+dev.off()
+```
+
+
+### Visualizing the model topics with wordclouds and findThoughts()
+
+```{r, wordclouds}
+library(wordcloud)
+stm_for_graph <- survey.fit.nometa
+scale <- c(4,.5)
+pdf("plots/model_choice/stm_nometa_K15_plot-wordcloud_topic1.pdf")
+cloud(stm_for_graph, topic=1, scale=scale) 
+dev.off()
+
+pdf("plots/model_choice/stm_nometa_K15_plot-wordcloud_topic2.pdf")
+cloud(stm_for_graph, topic=2, scale=scale) 
+dev.off()
+
+pdf("plots/model_choice/stm_nometa_K15_plot-wordcloud_topic3.pdf")
+cloud(stm_for_graph, topic=3, scale=scale) 
+dev.off()
+
+pdf("plots/model_choice/stm_nometa_K15_plot-wordcloud_topic4.pdf")
+cloud(stm_for_graph, topic=4, scale=scale) 
+dev.off()
+
+pdf("plots/model_choice/stm_nometa_K15_plot-wordcloud_topic5.pdf")
+cloud(stm_for_graph, topic=5, scale=scale) 
+dev.off()
+
+pdf("plots/model_choice/stm_nometa_K15_plot-wordcloud_topic6.pdf")
+cloud(stm_for_graph, topic=6, scale=scale) 
+dev.off()
+
+pdf("plots/model_choice/stm_nometa_K15_plot-wordcloud_topic7.pdf")
+cloud(stm_for_graph, topic=7, scale=scale) 
+dev.off()
+
+pdf("plots/model_choice/stm_nometa_K15_plot-wordcloud_topic8.pdf")
+cloud(stm_for_graph, topic=8, scale=scale) 
+dev.off()
+
+pdf("plots/model_choice/stm_nometa_K15_plot-wordcloud_topic9.pdf")
+cloud(stm_for_graph, topic=9, scale=scale) 
+dev.off()
+
+pdf("plots/model_choice/stm_nometa_K15_plot-wordcloud_topic10.pdf")
+cloud(stm_for_graph, topic=10, scale=scale) 
+dev.off()
+
+pdf("plots/model_choice/stm_nometa_K15_plot-wordcloud_topic11.pdf")
+cloud(stm_for_graph, topic=11, scale=scale) 
+dev.off()
+
+pdf("plots/model_choice/stm_nometa_K15_plot-wordcloud_topic12.pdf")
+cloud(stm_for_graph, topic=12, scale=scale) 
+dev.off()
+
+pdf("plots/model_choice/stm_nometa_K15_plot-wordcloud_topic13.pdf")
+cloud(stm_for_graph, topic=13, scale=scale) 
+dev.off()
+
+pdf("plots/model_choice/stm_nometa_K15_plot-wordcloud_topic14.pdf")
+cloud(stm_for_graph, topic=14, scale=scale) 
+dev.off()
+
+pdf("plots/model_choice/stm_nometa_K15_plot-wordcloud_topic15.pdf")
+cloud(stm_for_graph, topic=15, scale=scale) 
+dev.off()
+
+cloud(stm_for_graph, topic=1, scale=scale) 
+cloud(stm_for_graph, topic=2, scale=scale) 
+cloud(stm_for_graph, topic=3, scale=scale) 
+cloud(stm_for_graph, topic=4, scale=scale) 
+cloud(stm_for_graph, topic=5, scale=scale) 
+cloud(stm_for_graph, topic=6, scale=scale) 
+cloud(stm_for_graph, topic=7, scale=scale) 
+cloud(stm_for_graph, topic=8, scale=scale) 
+cloud(stm_for_graph, topic=9, scale=scale) 
+cloud(stm_for_graph, topic=10, scale=scale) 
+cloud(stm_for_graph, topic=11, scale=scale) 
+cloud(stm_for_graph, topic=12, scale=scale) 
+cloud(stm_for_graph, topic=13, scale=scale) 
+cloud(stm_for_graph, topic=14, scale=scale) 
+cloud(stm_for_graph, topic=15, scale=scale)
+```
+
+## Estimate the structural topic models (STM) for the chosen K and metadata relevant to each question and survey element of interest
+
+### Summary of models and key covariates:
+- survey.fit.frame_part, imce_Partic + frame
+- survey.fit.dens_w_preframe_attitude, imce_dens + preframe_densifproj_acceptance
+- survey.fit.climate_w_attitude, imce_ClimNeutr + climate_concern
+- survey.fit.rentc_zone_pol, imce_RentContr + imce_InclZon + political_left_right
+- survey.fit.rentc_zone_pol_w_context,  imce_RentContr + imce_InclZon + political_left_right
+- survey.fit.rentc_zone_minority_w_context, imce_RentContr + imce_InclZon + minority
+- survey.fit.dens_w_preframe_attitude_w_controls imce_dens + preframe_densifproj_acceptance + gender_Male + minority + age + income + education + city
+
+- demographic controls include: gender - 'gender_Male', age - 'age', income - 'income', education - 'education', minority = 'minority'
+
+```{r, stm}
+
+data <- survey.dfm
+out <- survey.dfm2stm
+
+####################################################################
+### Fit Models and Make Estimates
+
+# Model 0 - no metadata
+survey.fit.nometa <- stm(documents = out$documents, 
+                         vocab = out$vocab, 
+                         K = 15, max.em.its = 100,
+                         data = out$meta, 
+                         init.type = "Spectral", verbose = FALSE)
+
+# Model 1 - imce part with frame
+survey.fit.frame_part <- stm(out$documents, 
+                             vocab = out$vocab, 
+                             K = 15, max.em.its = 100,
+                             prevalence =~ imce_Partic + frame,
+                             data = out$meta, 
+                             init.type = "Spectral", verbose=FALSE)
+
+estEff_frame_part <- estimateEffect(
+  formula = 1:15 ~ imce_Partic + frame, 
+  stmobj = survey.fit.frame_part, 
+  meta = out$meta, 
+  uncertainty = "Global")
+
+# Model 1 w/ controls: 
+survey.fit.frame_part_w_controls <- stm(out$documents, 
+                             vocab = out$vocab, 
+                             K = 15, max.em.its = 100,
+                             prevalence =~ imce_Partic + frame + gender_Male + minority + age + income + education,
+                             data = out$meta, 
+                             init.type = "Spectral", verbose=FALSE)
+
+estEff_frame_part_w_controls <- estimateEffect(
+  formula = 1:15 ~ imce_Partic + frame + gender_Male + minority + age + income + education, 
+  stmobj = survey.fit.frame_part_w_controls, 
+  meta = out$meta, 
+  uncertainty = "Global")
+
+# Model 2 - imce densif with pre-frame dens attitude
+survey.fit.dens_w_preframe_attitude <- stm(out$documents, 
+                                           vocab = out$vocab, 
+                                           K = 15, max.em.its = 100,
+                                           prevalence =~ imce_dens + preframe_densifproj_acceptance,
+                                           data = out$meta, 
+                                           init.type = "Spectral", verbose=FALSE)
+
+estEff_dens_w_preframe_attitude <- estimateEffect(
+  formula = 1:15 ~ imce_dens + preframe_densifproj_acceptance,
+  stmobj = survey.fit.dens_w_preframe_attitude, 
+  meta = out$meta, 
+  uncertainty = "Global")
+
+# Model 2 w/ controls
+survey.fit.dens_w_preframe_attitude_w_controls <- stm(out$documents, 
+                                                vocab = out$vocab, 
+                                                K = 15, max.em.its = 100,
+                                                prevalence =~ imce_dens + preframe_densifproj_acceptance + gender_Male + minority + age + income + education + city,
+                                                data = out$meta, 
+                                                init.type = "Spectral", verbose=FALSE)
+
+estEff_dens_w_preframe_attitude_w_controls <- estimateEffect(
+  formula = 1:15 ~ imce_dens + preframe_densifproj_acceptance + gender_Male + minority + age + income + education + city,
+  stmobj = survey.fit.dens_w_preframe_attitude_w_controls, 
+  meta = out$meta, 
+  uncertainty = "Global")
+
+# Model 3 - imce climate with pre-frame climate attitudes
+survey.fit.climate_w_attitude <- stm(out$documents, 
+                                     vocab = out$vocab, 
+                                     K = 15, max.em.its = 100,
+                                     prevalence =~ imce_ClimNeutr + climate_concern,
+                                     data = out$meta, 
+                                     init.type = "Spectral", verbose=FALSE)
+
+estEff_climate <- estimateEffect(
+  formula = 1:15 ~ imce_ClimNeutr + climate_concern,
+  stmobj = survey.fit.climate_w_attitude, 
+  meta = out$meta, 
+  uncertainty = "Global")
+
+
+# Model 3 w/ controls
+survey.fit.climate_w_attitude_w_controls <- stm(out$documents, 
+                                     vocab = out$vocab, 
+                                     K = 15, max.em.its = 100,
+                                     prevalence =~ imce_ClimNeutr + climate_concern + gender_Male + minority + age + income + education,
+                                     data = out$meta, 
+                                     init.type = "Spectral", verbose=FALSE)
+
+estEff_climate_w_controls <- estimateEffect(
+  formula = 1:15 ~ imce_ClimNeutr + climate_concern + gender_Male + minority + age + income + education,
+  stmobj = survey.fit.climate_w_attitude_w_controls, 
+  meta = out$meta, 
+  uncertainty = "Global")
+
+
+# Model 4 - imce rent control and zoning with political affiliation
+survey.fit.rentc_zone_pol <- stm(out$documents, 
+                                 vocab = out$vocab, 
+                                 K = 15, max.em.its = 100,
+                                 prevalence =~ imce_RentContr + imce_InclZon + political_left_right,
+                                 data = out$meta, 
+                                 init.type = "Spectral", verbose=FALSE)
+
+
+estEff_rentc_zone_pol <- estimateEffect(
+  formula = 1:15 ~ imce_RentContr + imce_InclZon + political_left_right,
+  stmobj = survey.fit.rentc_zone_pol, 
+  meta = out$meta, 
+  uncertainty = "Global")
+
+# Model 4 w/ controls
+survey.fit.rentc_zone_pol_w_controls <- stm(out$documents, 
+                                 vocab = out$vocab, 
+                                 K = 15, max.em.its = 100,
+                                 prevalence =~ imce_RentContr + imce_InclZon + political_left_right + gender_Male + minority + age + income + education,
+                                 data = out$meta, 
+                                 init.type = "Spectral", verbose=FALSE)
+
+
+estEff_rentc_zone_pol_w_controls <- estimateEffect(
+  formula = 1:15 ~ imce_RentContr + imce_InclZon + political_left_right + gender_Male + minority + age + income + education,
+  stmobj = survey.fit.rentc_zone_pol_w_controls, 
+  meta = out$meta, 
+  uncertainty = "Global")
+
+# Model 5 w/ controls - imce rent control and zoning with minority and controls 
+survey.fit.rentc_zone_minority_w_context_w_controls <- stm(out$documents, 
+                                                           vocab = out$vocab, 
+                                                           K = 15, max.em.its = 100,
+                                                           prevalence =~ imce_RentContr + imce_InclZon + gender_Male + minority + age + income + education,
+                                                           content =~ minority,
+                                                           data = out$meta, 
+                                                           init.type = "Spectral", verbose=FALSE)
+
+
+estEff_rentc_zone_minority_w_context_w_controls <- estimateEffect(
+  formula = 1:15 ~ imce_RentContr + imce_InclZon + gender_Male + minority + age + income + education,
+  stmobj = survey.fit.rentc_zone_minority_w_context_w_controls, 
+  meta = out$meta, 
+  uncertainty = "Global")
+
+# Model 6 w/ controls - imce rent control and zoning with controls and city (will also include if they have seen_landlord_pressure and if they fear being forced out)
+survey.fit.rentc_zone_city_w_context_w_controls <- stm(out$documents, 
+                                                           vocab = out$vocab, 
+                                                           K = 15, max.em.its = 100,
+                                                           prevalence =~ imce_RentContr + imce_InclZon + seen_landlord_pressure + fear_forced_out 
+                                                              + city + gender_Male + minority + age + income + education,
+                                                           content =~ city,
+                                                           data = out$meta, 
+                                                           init.type = "Spectral", verbose=FALSE)
+
+
+estEff_rentc_zone_city_w_context_w_controls <- estimateEffect(
+  formula = 1:15 ~ imce_RentContr + imce_InclZon + seen_landlord_pressure + fear_forced_out 
+  + city + gender_Male + minority + age + income + education,
+  stmobj = survey.fit.rentc_zone_city_w_context_w_controls, 
+  meta = out$meta, 
+  uncertainty = "Global")
+
+
+# Model 2 w/ controls and city content modifier
+survey.fit.dens_w_preframe_attitude_w_controls_inc_city_content <- stm(out$documents, 
+                                                      vocab = out$vocab, 
+                                                      K = 15, max.em.its = 100,
+                                                      prevalence =~ imce_dens + preframe_densifproj_acceptance + gender_Male + minority + age + income + education + city,
+                                                      content =~ city, 
+                                                      data = out$meta, 
+                                                      init.type = "Spectral", verbose=FALSE)
+
+
+estEff_dens_w_preframe_attitude_w_controls_inc_city_content <- estimateEffect(
+  formula = 1:15 ~ imce_dens + preframe_densifproj_acceptance + gender_Male + minority + age + income + education + city,
+  stmobj = survey.fit.dens_w_preframe_attitude_w_controls_inc_city_content, 
+  meta = out$meta, 
+  uncertainty = "Global")
+```
+
+## Write the STM models and effect estimates to an Rdata file for examination with stminsights and other visualizations
+
+```{r, write_data}
+# save objects in .RData file
+save.image('stm_models_dens_survey_paper_final_2022.RData')
+```
