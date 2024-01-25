@@ -1,4 +1,4 @@
-# Code for reproducing STM models and visualizations presented in the "Nuancing Conjoint Experiments" SPUR paper (to be submitted)
+# Reproducing STM models and visualizations presented in the **"Nuancing Conjoint Experiments: Using Natural Language Processing to Analyze Decision-Reasoning"**
 
 ## Setup for STM (R)
 The code for computing STM (Structural Topic Modelling) is in R. Install R if you have not already installed it, and download the required packages for workflow.
